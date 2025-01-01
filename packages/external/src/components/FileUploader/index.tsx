@@ -1,25 +1,61 @@
 import { useCallback, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Button } from "@/components/ui/button"
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
 import { Upload, File } from 'lucide-react'
 import { TransferStatus } from '@file-transfer/shared'
-import { UploadService } from '@/lib/services/upload-service'
 
 interface FileUploaderProps {
   onStatusChange: (status: TransferStatus) => void;
 }
 
-export default function FileUploader({ onStatusChange }: FileUploaderProps) {
+export function FileUploader({ onStatusChange }: FileUploaderProps) {
   const [file, setFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
 
-  const uploadService = new UploadService()
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return
+    
+    const file = acceptedFiles[0]
+    setFile(file)
+    
+    const formData = new FormData()
+    formData.append('file', file)
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles.length > 0) {
-      setFile(acceptedFiles[0])
+    setIsUploading(true)
+    onStatusChange({
+      status: 'uploading',
+      progress: 0,
+    })
+
+    try {
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      })
+
+      const result = await response.json()
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Upload failed')
+      }
+
+      onStatusChange({
+        status: 'completed',
+        progress: 100,
+        code: result.data.transferCode
+      })
+    } catch (error) {
+      onStatusChange({
+        status: 'failed',
+        progress: 0,
+        error: error instanceof Error ? error.message : 'Upload failed'
+      })
+    } finally {
+      setIsUploading(false)
     }
-  }, [])
+  }, [onStatusChange])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -27,19 +63,6 @@ export default function FileUploader({ onStatusChange }: FileUploaderProps) {
     maxSize: 500 * 1024 * 1024, // 500MB
     disabled: isUploading
   })
-
-  const handleUpload = async () => {
-    if (!file || isUploading) return
-
-    setIsUploading(true)
-    try {
-      await uploadService.uploadFile(file, onStatusChange)
-    } catch (error) {
-      console.error('上传失败:', error)
-    } finally {
-      setIsUploading(false)
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -62,7 +85,7 @@ export default function FileUploader({ onStatusChange }: FileUploaderProps) {
         </p>
       </div>
 
-      {file && (
+      {file && !isUploading && (
         <div className="space-y-4">
           <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
             <File className="h-5 w-5 text-primary" />
@@ -73,14 +96,6 @@ export default function FileUploader({ onStatusChange }: FileUploaderProps) {
               </p>
             </div>
           </div>
-
-          <Button 
-            onClick={handleUpload} 
-            className="w-full"
-            size="lg"
-          >
-            开始上传
-          </Button>
         </div>
       )}
     </div>

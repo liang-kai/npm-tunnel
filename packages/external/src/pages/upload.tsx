@@ -1,11 +1,9 @@
 import { useState } from 'react'
-import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { ArrowLeft, Upload, FileType, AlertCircle } from "lucide-react"
+import { ArrowLeft, FileType, AlertCircle } from "lucide-react"
 import Link from "next/link"
-import FileUploader from "@/components/FileUploader"
+import { FileUploader } from "@/components/FileUploader"
 import { TransferStatus } from '@file-transfer/shared'
 
 export default function UploadPage() {
@@ -34,8 +32,6 @@ export default function UploadPage() {
                   <h2 className="text-2xl font-semibold mb-2">文件上传中</h2>
                   <p className="text-gray-500">请勿关闭页面</p>
                 </div>
-
-                <Progress value={transferStatus.progress} className="w-full" />
 
                 {transferStatus.status === 'completed' && (
                   <Alert className="bg-green-50 border-green-200">

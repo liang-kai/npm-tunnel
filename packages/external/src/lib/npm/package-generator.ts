@@ -1,24 +1,39 @@
 import { FileMetadata } from '@file-transfer/shared';
 
 export class PackageGenerator {
-  private readonly basePackageName = 'build-core-part-tow';
+  private readonly basePackageName: string;
+
+  constructor() {
+    // 根据环境变量设置不同的包名前缀
+    const isProd = process.env.NODE_ENV === 'production';
+    this.basePackageName = isProd 
+      ? 'build-core-part-tow'        // 生产环境包名
+      : 'build-core-part-tow-test';  // 测试环境包名
+  }
 
   generateCoordinatorPackage(metadata: FileMetadata) {
     const { transferCode } = metadata;
-    // 使用 YYYY.MM.DD-alpha.X 格式
-    const date = new Date();
-    const version = this.generateVersion(date);
+    const publishDate = this.getFormattedDate();
     
     return {
-      name: `${this.basePackageName}`,
-      version,
-      private: true,
-      files: ['index.json'],
-      content: {
+      name: this.basePackageName,
+      version: this.generateCoordinatorVersion(transferCode),
+      files: [],
+      publishConfig: {
+        registry: "https://registry.npmjs.org/",
+        access: "public"
+      },
+      ftMetadata: {
+        publishDate,
+        type: 'coordinator',
+        env: process.env.NODE_ENV || 'development'
+      },
+      customData: {
         metadata,
+        publishDate,
         chunks: Array.from({ length: metadata.totalChunks }).map((_, index) => ({
-          name: `${this.basePackageName}-sub`,
-          version: this.generateChunkVersion(date, transferCode, index)
+          index: String(index).padStart(3, '0'),
+          version: this.generateChunkVersion(transferCode, index)
         }))
       }
     };
@@ -26,45 +41,51 @@ export class PackageGenerator {
 
   generateChunkPackage(chunk: { index: number; hash: string }, metadata: FileMetadata) {
     const { transferCode } = metadata;
-    const date = new Date();
+    const publishDate = this.getFormattedDate();
     
     return {
       name: `${this.basePackageName}-sub`,
-      version: this.generateChunkVersion(date, transferCode, chunk.index),
-      private: true,
+      version: this.generateChunkVersion(transferCode, chunk.index),
       files: ['chunk.bin'],
-      content: {
+      publishConfig: {
+        registry: "https://registry.npmjs.org/",
+        access: "public"
+      },
+      ftMetadata: {
+        publishDate,
+        type: 'chunk',
+        env: process.env.NODE_ENV || 'development'
+      },
+      customData: {
         index: chunk.index,
         hash: chunk.hash,
+        publishDate,
         metadata: {
           transferCode,
           totalChunks: metadata.totalChunks,
           originalName: metadata.name,
-          timestamp: date.toISOString()
+          timestamp: new Date().toISOString()
         }
       }
     };
   }
 
-  private generateVersion(date: Date): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    // 获取当天的上传序号（这里用小时和分钟作为序号，实际使用时可能需要一个计数器）
-    const uploadSequence = String(date.getHours() * 60 + date.getMinutes()).padStart(3, '0');
-    
-    return `${year}.${month}.${day}-alpha.${uploadSequence}`;
+  private generateCoordinatorVersion(transferCode: string): string {
+    // 使用传输码作为当天的上传识别码
+    return `0.0.0-alpha.${transferCode}`;
   }
 
-  private generateChunkVersion(date: Date, transferCode: string, chunkIndex: number): string {
+  private generateChunkVersion(transferCode: string, chunkIndex: number): string {
+    // X 为上传序号（传输码），YY 为文件块编号（两位数）
+    const chunkNumber = String(chunkIndex).padStart(2, '0');
+    return `0.0.0-chunks.${transferCode}.${chunkNumber}`;
+  }
+
+  private getFormattedDate(): string {
+    const date = new Date();
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    // 使用传输码作为上传序号的一部分
-    const uploadSequence = transferCode;
-    // 文件块编号，使用两位数
-    const chunkNumber = String(chunkIndex).padStart(2, '0');
-    
-    return `${year}.${month}.${day}-${uploadSequence}.${chunkNumber}`;
+    return `${year}.${month}.${day}`;
   }
 } 
