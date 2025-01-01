@@ -10,3 +10,4 @@ packages/external/.env.local
 
 # 但保留生产环境配置模板
 !.env.production
+packages/internal/downloads

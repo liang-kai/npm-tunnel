@@ -58,7 +58,7 @@ export default function DownloadPage() {
         status: 'completed',
         progress: 100,
         metadata,
-        filePath: data.filePath
+        filePath: data.data?.filePath
       })
     } catch (error) {
       setStatus({

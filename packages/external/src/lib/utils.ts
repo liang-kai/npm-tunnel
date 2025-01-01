@@ -9,3 +9,5 @@ export function cn(...inputs: ClassValue[]) {
 export function generateTransferCode(): string {
   return Math.floor(1000 + Math.random() * 9000).toString()
 }
+
+export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

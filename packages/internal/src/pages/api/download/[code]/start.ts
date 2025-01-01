@@ -1,39 +1,56 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { NpmDownloader } from '@/lib/npm/downloader'
-import { SyncService } from '@/services/sync'
-import path from 'path'
+import { FileMetadata } from '@file-transfer/shared'
 
-// 创建下载服务实例
-const downloader = new NpmDownloader(
-  process.env.NPM_REGISTRY || '',
-  process.env.NPM_TOKEN || ''
-)
+interface StartDownloadResponse {
+  success: boolean;
+  data?: {
+    filePath: string;
+    metadata: FileMetadata;
+  };
+  error?: string;
+}
 
-const syncService = new SyncService(
-  downloader,
-  '*/5 * * * *', // 每5分钟检查一次
-  path.join(process.cwd(), 'downloads')
-)
-
-// 启动同步服务
-syncService.start()
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest, 
+  res: NextApiResponse<StartDownloadResponse>
+) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' })
+    return res.status(405).json({ 
+      success: false, 
+      error: 'Method not allowed' 
+    })
   }
 
   const { code } = req.query
   if (!code || typeof code !== 'string') {
-    return res.status(400).json({ error: 'Invalid transfer code' })
+    return res.status(400).json({ 
+      success: false, 
+      error: 'Invalid transfer code' 
+    })
   }
 
   try {
-    // 添加下载任务
-    await syncService.addTask(code)
-    res.status(200).json({ message: 'Download started' })
+    const downloader = new NpmDownloader(
+      process.env.NPM_REGISTRY || '',
+      process.env.NPM_TOKEN || ''
+    )
+
+    const metadata = await downloader.getMetadata(code)
+    const filePath = await downloader.downloadFile(code)
+
+    res.status(200).json({
+      success: true,
+      data: {
+        filePath,
+        metadata
+      }
+    })
   } catch (error) {
-    console.error('启动下载失败:', error)
-    res.status(500).json({ error: 'Failed to start download' })
+    console.error('Download failed:', error)
+    res.status(500).json({ 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Download failed' 
+    })
   }
 } 

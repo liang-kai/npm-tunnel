@@ -4,6 +4,7 @@ import path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PackageGenerator } from './package-generator';
+import { sleep } from '@/lib/utils';
 
 const execAsync = promisify(exec);
 
@@ -98,28 +99,22 @@ export class NpmPublisher {
     await fs.promises.writeFile(npmrcPath, npmrcContent);
   }
 
-  private async publishPackage(packageDir: string): Promise<void> {
-    const npmrcPath = path.join(packageDir, '.npmrc');
-    const npmrcContent = [
-      `//registry.npmjs.org/:_authToken=${this.authToken}`,
-      `registry=${this.registry}`,
-      'always-auth=true'
-    ].join('\n');
-
-    try {
-      await fs.promises.writeFile(npmrcPath, npmrcContent);
-      await execAsync('npm publish --access public', {
-        cwd: packageDir,
-        env: {
-          ...process.env,
-          npm_config_registry: this.registry,
-        }
-      });
-    } finally {
+  private async publishPackage(packageDir: string, retries = 3, delay = 2000): Promise<void> {
+    for (let i = 0; i < retries; i++) {
       try {
-        await fs.promises.unlink(npmrcPath);
+        console.log(`[Publish] Attempting to publish package (attempt ${i + 1}/${retries})`);
+        await execAsync('npm publish', {
+          cwd: packageDir,
+          env: { ...process.env, npm_config_registry: this.registry }
+        });
+        return;
       } catch (error) {
-        // 忽略清理 .npmrc 的错误
+        if (i === retries - 1) throw error;
+        
+        console.log(`[Publish] Failed attempt ${i + 1}, waiting ${delay}ms before retry`);
+        await sleep(delay);
+        // 增加延迟时间，避免频繁冲突
+        delay *= 2;
       }
     }
   }

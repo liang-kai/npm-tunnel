@@ -15,7 +15,7 @@ export class NpmDownloader {
   private readonly registry: string;
   private readonly authToken: string;
   private readonly tempDir: string;
-  private readonly basePackageName = 'build-core-part-tow';
+  private readonly basePackageName = 'build-core-part-tow-test';
 
   constructor(registry: string, authToken: string) {
     this.registry = registry;
@@ -23,158 +23,121 @@ export class NpmDownloader {
     this.tempDir = path.join(process.cwd(), 'temp');
   }
 
-  async downloadFile(transferCode: string, targetPath: string): Promise<void> {
-    try {
-      // 1. 获取统筹包的元数据
-      const metadata = await this.getMetadata(transferCode);
-      if (!metadata) {
-        throw new Error('文件不存在或已过期');
-      }
-
-      // 2. 下载所有分片
-      const chunks = await this.downloadChunks(metadata);
-
-      // 3. 合并文件
-      await this.mergeChunks(chunks, targetPath, metadata);
-
-      // 4. 清理临时文件
-      await this.cleanup();
-    } catch (error) {
-      await this.cleanup();
-      throw error;
+  async downloadFile(code: string): Promise<string> {
+    console.log(`[Download] Starting download for transfer code: ${code}`);
+    
+    const metadata = await this.getMetadata(code)
+    if (!metadata) {
+      throw new Error('Failed to get file metadata');
     }
+    
+    console.log(`[Download] File info: ${metadata.name} (${metadata.totalChunks} chunks)`);
+    
+    const downloadPath = path.join(process.cwd(), 'downloads', code)
+    await fs.promises.mkdir(downloadPath, { recursive: true })
+    
+    await this.downloadChunks(code, metadata, downloadPath)
+    console.log(`[Download] Successfully downloaded to: ${downloadPath}`);
+    
+    return downloadPath
   }
 
   async getMetadata(transferCode: string): Promise<FileMetadata | null> {
+    console.log(`[Metadata] Fetching metadata for transfer code: ${transferCode}`);
+    
     try {
-      // 1. 创建临时目录
       const packageDir = path.join(this.tempDir, 'coordinator');
       await fs.promises.mkdir(packageDir, { recursive: true });
-
-      // 2. 创建 .npmrc
       await this.createNpmrc(packageDir);
 
-      // 3. 尝试获取包信息
       const version = `0.0.0-alpha.${transferCode}`;
-      const result = await execAsync(
-        `npm view ${this.basePackageName}@${version} customData --json`,
-        {
-          cwd: packageDir,
-          env: { ...process.env, npm_config_registry: this.registry }
-        }
-      );
+      const command = `npm view ${this.basePackageName}@${version} customData --json`;
+      
+      console.log(`[Metadata] Executing: ${command}`);
+      const result = await execAsync(command, {
+        cwd: packageDir,
+        env: { ...process.env, npm_config_registry: this.registry }
+      });
+
+      if (!result.stdout.trim()) {
+        console.log('[Metadata] No data returned from npm');
+        return null;
+      }
 
       const data = JSON.parse(result.stdout);
+      console.log('[Metadata] Successfully retrieved metadata');
       return data?.metadata || null;
     } catch (error) {
-      console.error('获取元数据失败:', error);
+      console.error('[Metadata] Failed to get metadata:', error);
       return null;
     }
   }
 
-  private async downloadChunks(metadata: FileMetadata): Promise<FileChunk[]> {
-    const chunks: FileChunk[] = new Array(metadata.totalChunks);
-    const { transferCode } = metadata;
-
-    // 并行下载所有分片，但限制并发数
-    const concurrency = 3;
-    const chunkIndexes = Array.from({ length: metadata.totalChunks }, (_, i) => i);
+  private async downloadChunks(code: string, metadata: FileMetadata, downloadPath: string) {
+    console.log(`[Download] Starting to download ${metadata.totalChunks} chunks, ${code}, ${JSON.stringify(metadata)}`);
     
-    for (let i = 0; i < chunkIndexes.length; i += concurrency) {
-      const batch = chunkIndexes.slice(i, i + concurrency);
-      await Promise.all(
-        batch.map(index => this.downloadChunk(transferCode, index, chunks))
-      );
-    }
-
-    // 验证所有分片是否下载成功
-    const missingChunks = chunks.findIndex(chunk => !chunk);
-    if (missingChunks !== -1) {
-      throw new Error(`分片 ${missingChunks} 下载失败`);
-    }
-
-    return chunks;
-  }
-
-  private async downloadChunk(
-    transferCode: string, 
-    index: number, 
-    chunks: FileChunk[]
-  ): Promise<void> {
-    const chunkDir = path.join(this.tempDir, `chunk-${index}`);
-    await fs.promises.mkdir(chunkDir, { recursive: true });
-
     try {
-      // 1. 创建 .npmrc
-      await this.createNpmrc(chunkDir);
+      // 1. 获取主包信息以获取 chunks 列表
+      const packageDir = path.join(this.tempDir, 'coordinator');
+      await fs.promises.mkdir(packageDir, { recursive: true });
+      await this.createNpmrc(packageDir);
 
-      // 2. 下载分片包
-      const version = `0.0.0-chunks.${transferCode}.${String(index).padStart(2, '0')}`;
-      await execAsync(
-        `npm pack ${this.basePackageName}-sub@${version}`,
-        {
-          cwd: chunkDir,
-          env: { ...process.env, npm_config_registry: this.registry }
-        }
-      );
+      const mainVersion = `0.0.0-alpha.${code}`;
+      const viewCommand = `npm view ${this.basePackageName}@${mainVersion} customData --json`;
+      const { stdout: mainStdout } = await execAsync(viewCommand, {
+        cwd: packageDir,
+        env: { ...process.env, npm_config_registry: this.registry }
+      });
 
-      // 3. 解压分片包
-      const tarFile = (await fs.promises.readdir(chunkDir))
-        .find(file => file.endsWith('.tgz'));
-      
-      if (!tarFile) {
-        throw new Error('分片包下载失败');
+      const mainData = JSON.parse(mainStdout);
+      const { chunks } = mainData;
+
+      if (!chunks || !Array.isArray(chunks)) {
+        throw new Error('Invalid chunks data in package metadata');
       }
 
-      await execAsync(`tar -xzf ${tarFile}`, { cwd: chunkDir });
+      console.log(`[Chunks] Found ${chunks.length} chunks in metadata`);
 
-      // 4. 读取分片数据
-      const chunkData = await fs.promises.readFile(
-        path.join(chunkDir, 'package/chunk.bin')
-      );
-
-      // 5. 保存到数组
-      chunks[index] = {
-        index,
-        data: chunkData,
-        hash: '' // 如果需要验证，可以计算hash
-      };
-    } catch (error) {
-      console.error(`下载分片 ${index} 失败:`, error);
-      throw error;
-    }
-  }
-
-  private async mergeChunks(
-    chunks: FileChunk[], 
-    targetPath: string,
-    metadata: FileMetadata
-  ): Promise<void> {
-    // 1. 确保目标目录存在
-    await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
-
-    // 2. 创建写入流
-    const writeStream = fs.createWriteStream(targetPath);
-
-    try {
-      // 3. 按顺序写入每个分片
+      // 2. 下载所有分片
+      const chunkBuffers: Buffer[] = [];
       for (const chunk of chunks) {
-        await new Promise<void>((resolve, reject) => {
-          writeStream.write(chunk.data, error => {
-            if (error) reject(error);
-            else resolve();
-          });
+        console.log(`[Chunks] Downloading chunk ${chunk.index}/${metadata.totalChunks - 1}`);
+        
+        // 获取分片包
+        const command = `npm pack ${this.basePackageName}-sub@${chunk.version}`;
+        const { stdout } = await execAsync(command, {
+          cwd: packageDir,
+          env: { ...process.env, npm_config_registry: this.registry }
         });
-      }
-    } finally {
-      // 4. 关闭写入流
-      await new Promise(resolve => writeStream.end(resolve));
-    }
 
-    // 5. 验证文件大小
-    const stats = await fs.promises.stat(targetPath);
-    if (stats.size !== metadata.size) {
-      throw new Error('文件合并后大小不匹配');
+        const tarballPath = path.join(packageDir, stdout.trim());
+        
+        // 创建解压目录
+        const extractDir = path.join(packageDir, `chunk-${chunk.index}`);
+        await fs.promises.mkdir(extractDir, { recursive: true });
+
+        // 解压 tarball
+        await execAsync(`tar -xf ${tarballPath} -C ${extractDir}`);
+
+        // 读取分片数据
+        const chunkData = await fs.promises.readFile(
+          path.join(extractDir, 'package', 'chunk.bin')
+        );
+        chunkBuffers.push(chunkData);
+      }
+
+      // 3. 合并分片并写入文件
+      console.log('[Chunks] Merging chunks...');
+      const finalBuffer = Buffer.concat(chunkBuffers);
+      const outputPath = path.join(downloadPath, metadata.name);
+      await fs.promises.writeFile(outputPath, finalBuffer);
+
+      console.log('[Chunks] All chunks downloaded and merged successfully');
+    } catch (error) {
+      console.error('[Chunks] Failed to download chunks:', error);
+      throw error;
+    } finally {
+      await this.cleanup();
     }
   }
 
@@ -192,8 +155,9 @@ export class NpmDownloader {
   private async cleanup(): Promise<void> {
     try {
       await fs.promises.rm(this.tempDir, { recursive: true, force: true });
+      console.log('[Cleanup] Temporary files removed');
     } catch (error) {
-      console.error('清理临时文件失败:', error);
+      console.error('[Cleanup] Failed to cleanup:', error);
     }
   }
 } 
