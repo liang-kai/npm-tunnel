@@ -1,0 +1,23 @@
+{
+    "name": "file-transfer-bridge",
+    "private": true,
+    "scripts": {
+        "dev:external": "pnpm --filter external dev",
+        "dev:internal": "pnpm --filter internal dev",
+        "build:external": "pnpm --filter external build",
+        "build:internal": "pnpm --filter internal build",
+        "test": "pnpm -r test",
+        "lint": "pnpm -r lint"
+    },
+    "devDependencies": {
+        "@types/node": "^20",
+        "@types/react": "^18",
+        "@typescript-eslint/eslint-plugin": "^6",
+        "@typescript-eslint/parser": "^6",
+        "eslint": "^8",
+        "typescript": "^5"
+    },
+    "dependencies": {
+        "shadcn-ui": "^0.9.4"
+    }
+}
